@@ -2,6 +2,7 @@ import os
 import sys
 import torch
 import numpy as np
+import csv
 
 from typing import List, Dict, Any
 
@@ -93,6 +94,190 @@ def get_valid_bboxes_3d(result_3d: Dict[str, torch.Tensor],
             sample_idx=sample_idx)
     
         
+def kitti_file_to_3d(result_path: str, single_file: bool = False):
+    """Read the detection results from a file and convert to a list of dictionaries.
+    """
+
+    annos = []
+
+    if single_file:
+        result_file = result_path
+        f = open(result_file, 'r')
+        lines = f.read().strip().split("\n")
+        f.close()
+        ### Iterate over all lines. Each line is a detection.
+        for line in lines:
+            sample_idx, name, truncated, occluded, alpha, bbox_1, bbox_2, bbox_3, bbox_4, dimensions_1, dimensions_2, dimensions_3, location_1, location_2, location_3, rotation_y, score = line.split()
+            sample_idx = int(sample_idx)
+            truncated = float(truncated)
+            occluded = int(occluded)
+            alpha = float(alpha)
+            bbox = [float(bbox_1), float(bbox_2), float(bbox_3), float(bbox_4)]
+            dimensions = [float(dimensions_1), float(dimensions_2), float(dimensions_3)]
+            location = [float(location_1), float(location_2), float(location_3)]
+            rotation_y = float(rotation_y)
+            score = float(score)
+            ### Create a dictionary for the frame if it does not exist
+            if len(annos) == 0 or annos[-1]['sample_idx'][0] != sample_idx:
+                if len(annos) > 0:
+                    annos[-1] = {k: np.stack(v) for k, v in annos[-1].items()}
+                annos.append({
+                    'sample_idx': [],
+                    'name': [],
+                    'truncated': [],
+                    'occluded': [],
+                    'alpha': [],
+                    'bbox': [],
+                    'dimensions': [],
+                    'location': [],
+                    'rotation_y': [],
+                    'score': []})
+            ### Append the detection to the dictionary
+            annos[-1]['sample_idx'].append(sample_idx)
+            annos[-1]['name'].append(name)
+            annos[-1]['truncated'].append(truncated)
+            annos[-1]['occluded'].append(occluded)
+            annos[-1]['alpha'].append(alpha)
+            annos[-1]['bbox'].append(bbox)
+            annos[-1]['dimensions'].append(dimensions)
+            annos[-1]['location'].append(location)
+            annos[-1]['rotation_y'].append(rotation_y)
+            annos[-1]['score'].append(score)
+        if len(annos) > 0:
+            annos[-1] = {k: np.stack(v) for k, v in annos[-1].items()}
+    else:
+        files = os.listdir(result_path)
+        files.sort()
+        ### Iterate over all files
+        for file in files:
+            result_file = os.path.join(result_path, file)
+            f = open(result_file, 'r')
+            lines = f.read().strip().split("\n")
+            f.close()
+            sample_idx = file.split('.')[0]
+            sample_idx = int(sample_idx)
+            annos.append({
+                'sample_idx': [],
+                'name': [],
+                'truncated': [],
+                'occluded': [],
+                'alpha': [],
+                'bbox': [],
+                'dimensions': [],
+                'location': [],
+                'rotation_y': [],
+                'score': []})
+            ### Iterate over all lines. Each line is a detection.
+            for line in lines:
+                if len(line) == 0:
+                    break
+                name, truncated, occluded, alpha, bbox_1, bbox_2, bbox_3, bbox_4, dimensions_1, dimensions_2, dimensions_3, location_1, location_2, location_3, rotation_y, score = line.split()
+                truncated = float(truncated)
+                occluded = int(occluded)
+                alpha = float(alpha)
+                bbox = [float(bbox_1), float(bbox_2), float(bbox_3), float(bbox_4)]
+                dimensions = [float(dimensions_1), float(dimensions_2), float(dimensions_3)]
+                location = [float(location_1), float(location_2), float(location_3)]
+                rotation_y = float(rotation_y)
+                score = float(score)
+                ### Append the detection to the dictionary
+                annos[-1]['sample_idx'].append(sample_idx)
+                annos[-1]['name'].append(name)
+                annos[-1]['truncated'].append(truncated)
+                annos[-1]['occluded'].append(occluded)
+                annos[-1]['alpha'].append(alpha)
+                annos[-1]['bbox'].append(bbox)
+                annos[-1]['dimensions'].append(dimensions)
+                annos[-1]['location'].append(location)
+                annos[-1]['rotation_y'].append(rotation_y)
+                annos[-1]['score'].append(score)
+            if len(annos[-1]['sample_idx']) > 0:
+                annos[-1] = {k: np.stack(v) for k, v in annos[-1].items()}
+            else:
+                annos[-1] = {
+                    'sample_idx': np.array([]),
+                    'name': np.array([]),
+                    'truncated': np.array([]),
+                    'occluded': np.array([]),
+                    'alpha': np.array([]),
+                    'bbox': np.zeros([0, 4]),
+                    'dimensions': np.zeros([0, 3]),
+                    'location': np.zeros([0, 3]),
+                    'rotation_y': np.array([]),
+                    'score': np.array([]),}
+
+    # annos = [anno for anno in annos if len(anno['score']) > 0]
+    return annos
+
+def kitti_3d_to_file(annos: Dict[str, List[Dict]], img_metas: Dict, folder: str, single_file: bool = False):
+    """Write the detection results to a file each frame or altogether.
+    annos: a listdetection results of a mini batch, output from MonoConDetector.batch_eval().
+    img_metas: a dictionary containing the meta information of the mini batch, output from MonoConDataset.
+    single_file: whether to write the detection results of all frames to a single file.
+    """
+    annos = annos['img_bbox']
+    
+    if single_file:
+        if not os.path.exists(os.path.dirname(folder)):
+            os.makedirs(os.path.dirname(folder))
+    else:
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+
+    if single_file:
+        ### Open the file for the whole dataset
+        predict_txt = folder
+        f = open(predict_txt, 'a', newline='')
+        w = csv.writer(f, delimiter=' ', lineterminator='\n')
+
+    ### Iterate over all frames
+    for i, anno in enumerate(annos):
+        ### Find the sample index
+        sample_idx = img_metas['sample_idx'][i]
+
+        if not single_file:
+            ### Open a file for the current frame
+            predict_txt = os.path.join(folder, f'{sample_idx:06d}.txt')
+            f = open(predict_txt, 'w', newline='')
+            w = csv.writer(f, delimiter=' ', lineterminator='\n')
+
+        num_det = len(anno['sample_idx'])
+
+        ### Skip if there is no detection
+        if num_det == 0:
+            if not single_file:
+                f.close()
+            continue
+
+        ### Iterate over all detections
+        for det_idx in range(num_det):
+            ### Get the detection information and form a row
+            name = anno['name'][det_idx]
+            truncated = anno['truncated'][det_idx]
+            occluded = anno['occluded'][det_idx]
+            alpha = anno['alpha'][det_idx]
+            bbox = anno['bbox'][det_idx]
+            dimensions = anno['dimensions'][det_idx]
+            location = anno['location'][det_idx]
+            rotation_y = anno['rotation_y'][det_idx]
+            score = anno['score'][det_idx]
+
+            # if name not in CLASSES:
+            if name != 'Car':
+                continue
+
+            ### Write the detection to the file
+            if single_file:
+                w.writerow([sample_idx, name, truncated, occluded, alpha, *bbox, *dimensions, *location, rotation_y, score])
+            else:
+                w.writerow([name, truncated, occluded, alpha, *bbox, *dimensions, *location, rotation_y, score])
+
+        if not single_file:
+            f.close()
+
+    if single_file:
+        f.close()
+    return
 
 def convert_to_kitti_3d(results_3d: List[Dict[str, torch.Tensor]],
                         img_metas: Dict[str, Any],

@@ -13,7 +13,7 @@ from engine.kitti_eval import kitti_eval
 from utils.data_classes import KITTICalibration, KITTIMultiObjects
 
 # Fixed Root
-IMAGESET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ImageSets')
+IMAGESET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ImageSets_final_prj')
 
 
 class BaseKITTIMono3DDataset(Dataset):
@@ -41,6 +41,10 @@ class BaseKITTIMono3DDataset(Dataset):
         self.image_dir = os.path.join(base_root, sub_root, 'image_2')
         self.image_files = [os.path.join(self.image_dir, f'{fp}.png') for fp in self.file_prefix]
         
+        # Image Meta Files
+        self.img_meta_dir = os.path.join(base_root, sub_root, 'img_meta')
+        self.img_meta_files = [os.path.join(self.img_meta_dir, f'{fp}.txt') for fp in self.file_prefix]
+
         # Calibration Files
         self.calib_dir = os.path.join(base_root, sub_root, 'calib')
         self.calib_files = [os.path.join(self.calib_dir, f'{fp}.txt') for fp in self.file_prefix]
@@ -76,6 +80,20 @@ class BaseKITTIMono3DDataset(Dataset):
             'ori_shape': image_data.shape[:2]}
         return (image_data, img_metas)
     
+    def load_img_meta(self, idx: int) -> Dict[str, Any]:
+        img_size_file = self.img_meta_files[idx]
+        with open(img_size_file, 'r') as f:
+            img_size = f.read().strip().split(' ')
+        img_size = [int(size) for size in img_size]
+
+        img_metas = {
+            'idx': idx,
+            'split': self.split,
+            'sample_idx': int(os.path.basename(img_size_file).split('.')[0]),
+            'image_path': self.image_files[idx],
+            'ori_shape': img_size}
+        return img_metas
+
     def load_calib(self, idx: int) -> KITTICalibration:
         return KITTICalibration(self.calib_files[idx])
     
@@ -100,7 +118,10 @@ class BaseKITTIMono3DDataset(Dataset):
         
         for idx in iter_:
             
-            _, img_metas = self.load_image(idx)
+            if os.path.exists(self.img_meta_files[idx]):
+                img_metas = self.load_img_meta(idx)
+            else:
+                _, img_metas = self.load_image(idx)
             
             calib = self.load_calib(idx)
             calib_dict = calib.get_info_dict()
@@ -126,12 +147,63 @@ class BaseKITTIMono3DDataset(Dataset):
         if self.gt_annos is None:
             gt_infos = self.collect_gt_infos(verbose=verbose)
             gt_annos = [info['annos'] for info in gt_infos]
+            sample_idxs = [info['image']['sample_idx'] for info in gt_infos]
             
             self.gt_annos = gt_annos
 
         ap_dict = dict()
         
         for name, result in kitti_format_results.items():
+            ### When reading detections from files, the length of dt_annos might be shorter than gt_annos. 
+            ### We want them to have the same length.
+            if len(result) != len(self.gt_annos):
+                print(f"Length of {name} is not same as the length of ground truth.")
+                print(f"Length of {name}: {len(result)}, Length of ground truth: {len(self.gt_annos)}")
+                print(f"Aligning {name} with ground truth...")
+                idx_in_gt = 0
+                result_aligned = []
+                for frame_result in result:
+                    idx_result = frame_result['sample_idx'][0]
+                    while sample_idxs[idx_in_gt] < idx_result:
+                        anno_dummy = {
+                            'sample_idx': np.array([sample_idxs[idx_in_gt]]),
+                            'name': np.array([]),
+                            'truncated': np.array([]),
+                            'occluded': np.array([]),
+                            'alpha': np.array([]),
+                            'bbox': np.zeros([0, 4]),
+                            'dimensions': np.zeros([0, 3]),
+                            'location': np.zeros([0, 3]),
+                            'rotation_y': np.array([]),
+                            'score': np.array([]),
+                        }
+                        result_aligned.append(anno_dummy)
+                        idx_in_gt += 1
+                    assert sample_idxs[idx_in_gt] == idx_result, f"error: idx_in_gt: {idx_in_gt}, sample_idxs[idx_in_gt]: {sample_idxs[idx_in_gt]} idx_result: {idx_result}"
+                    result_aligned.append(frame_result)
+                    idx_in_gt += 1
+                while idx_in_gt < len(sample_idxs):
+                    anno_dummy = {
+                        'sample_idx': np.array([sample_idxs[idx_in_gt]]),
+                        'name': np.array([]),
+                        'truncated': np.array([]),
+                        'occluded': np.array([]),
+                        'alpha': np.array([]),
+                        'bbox': np.zeros([0, 4]),
+                        'dimensions': np.zeros([0, 3]),
+                        'location': np.zeros([0, 3]),
+                        'rotation_y': np.array([]),
+                        'score': np.array([]),
+                    }
+                    result_aligned.append(anno_dummy)
+                    idx_in_gt += 1
+                    
+                result = result_aligned
+            else:
+                print(f"Length of {name} is same as the length of ground truth.")
+                print(f"Length of {name}: {len(result)}, Length of ground truth: {len(self.gt_annos)}")
+
+            
             if '2d' in name:
                 eval_types=['bbox']
             result_string, result_dict = kitti_eval(

@@ -1,3 +1,17 @@
+# A template repository for NA565 final project
+This repo is accommodated from [MonoCon](https://github.com/2gunsu/monocon-pytorch) for the NA565 final project. 
+
+After setting up the envionment and converting the final project dataset into the KITTI format, the training code should work directly. 
+
+### Submission Format Generation
+The repo does not have an inference script to generate detection files in the test set, where ground truth labels are not available. You need to implement this by yourself to generate the submission file. 
+
+We provide utility functions `kitti_3d_to_file()` and `kitti_file_to_3d()` in `utils/kitti_convert_utils.py`, to generate detection files in kitti format. We also provide `merger.py` to merge detections files for all frames into a single file. Use them to write your own inference script to generate the submission file on the test set. 
+
+Hint: you may look into `test.py` and `MonoconEngine.evaluate()` and modify from there to output detection files. 
+
+Below are the original readme of [MonoCon](https://github.com/2gunsu/monocon-pytorch).
+
 # MonoCon (AAAI, 2022)
 This repository contains unofficial pytorch implementation for **[MonoCon: Learning Auxiliary Monocular Contexts Helps Monocular 3D Object Detection (AAAI, 2022)](https://arxiv.org/abs/2112.04628)**.   
 We have removed the dependency on [mmdetection3d](https://github.com/open-mmlab/mmdetection3d) from the original author's [code](https://github.com/Xianpeng919/MonoCon).
@@ -121,10 +135,6 @@ python test.py  --config_file       [FILL]      # Config file (.yaml file)
                 --save_dir          [FILL]      # Path where visualization results will be saved to
 ```
 
-### Submission Format Generation
-```bash
-```
-Will be added later 😢
 
 ### Video Inference on KITTI Raw Dataset
 The KITTI Raw Dataset can be downloaded by scene from [here](https://www.cvlibs.net/datasets/kitti/raw_data.php?type=city). (You will probably need to log in.)  

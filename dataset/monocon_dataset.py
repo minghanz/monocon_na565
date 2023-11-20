@@ -2,6 +2,7 @@ import os
 import sys
 import torch
 import numpy as np
+import cv2
 
 from typing import List, Dict, Any
 
@@ -77,6 +78,15 @@ class MonoConDataset(BaseKITTIMono3DDataset):
         
         image, img_metas = self.load_image(idx)
         calib = self.load_calib(idx)
+        
+        if self.split == 'test':
+            result_dict = {
+                'img': image,
+                'img_metas': img_metas,
+                'calib': calib}
+            
+            result_dict = self.transforms(result_dict)
+            return result_dict
         
         # Raw State: Cam0 + Bottom-Center + Global Yaw
         # Converted to Cam2 + Local Yaw
@@ -186,6 +196,11 @@ class MonoConDataset(BaseKITTIMono3DDataset):
         # Merge Calib
         merged_calib = [d['calib'] for d in batched]
         
+        if 'label' not in batched[0]:
+            return {'img': merged_image, 
+                    'img_metas': merged_metas, 
+                    'calib': merged_calib}
+        
         # Merge Label
         label_list = [d['label'] for d in batched]
         
@@ -198,3 +213,41 @@ class MonoConDataset(BaseKITTIMono3DDataset):
                 'img_metas': merged_metas, 
                 'calib': merged_calib, 
                 'label': merged_label}
+
+    def visualize(self, idx):
+        '''Visualize the image with ground truth 3D bbox annotations.
+        '''
+        
+        line_indices = ((0, 1), (0, 3), (0, 4), (1, 2), (1, 5), (3, 2), (3, 7),
+                        (4, 5), (4, 7), (2, 6), (5, 6), (6, 7))
+        
+        image, img_metas = self.load_image(idx)
+        calib = self.load_calib(idx)
+        
+        # Raw State: Cam0 + Bottom-Center + Global Yaw
+        # Converted to Cam2, then overlay the projection of 3D bbox on the image from Cam2
+        raw_labels = self.load_label(idx)
+
+        objs = raw_labels.obj_list
+        for obj in objs:
+            proj_kpts = obj.projected_kpts.astype(np.int)
+            box2d = obj.box2d.astype(np.int)
+            ### draw the frame of the 3D bbox given the keypoints                
+            color = (255, 255, 255)
+            for start, end in line_indices:
+                image = cv2.line(image, 
+                                (proj_kpts[start, 0], proj_kpts[start, 1]),
+                                (proj_kpts[end, 0], proj_kpts[end, 1]),
+                                color,
+                                thickness=2,
+                                lineType=cv2.LINE_AA)
+            ### draw the 2D bbox         
+            color_2d = (255, 255, 0)
+            image = cv2.rectangle(image, 
+                                (box2d[0], box2d[1]), 
+                                (box2d[2], box2d[3]), 
+                                color_2d, 
+                                thickness=1, 
+                                lineType=cv2.LINE_AA)
+        image = cv2.cvtColor(image, code=cv2.COLOR_BGR2RGB)
+        return image
